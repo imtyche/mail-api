@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -97,6 +98,18 @@ type EmailRequest struct {
 }
 
 func main() {
+	// 1. 初始化日志到当前目录的 mail.log 文件
+	logFile, err := os.OpenFile("mail.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("无法创建或打开日志文件: %v", err)
+	}
+	defer logFile.Close()
+
+	// 2. 将日志同时输出到控制台和文件，并设置给 log 包与 gin 框架
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	gin.DefaultWriter = multiWriter // 让 Gin 的访问日志也写入该文件
+
 	config := loadConfig()
 
 	if len(config.Accounts) == 0 || config.ValidAppKey == "" {
@@ -136,7 +149,7 @@ func main() {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "所有账号均发送失败: " + lastErr.Error()})
 	})
 
-	err := r.Run(":5010")
+	err = r.Run(":5010")
 	if err != nil {
 		return
 	}
