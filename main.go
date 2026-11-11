@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/gomail.v2"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type EmailAccount struct {
@@ -98,17 +100,19 @@ type EmailRequest struct {
 }
 
 func main() {
-	// 1. 初始化日志到当前目录的 mail.log 文件
-	logFile, err := os.OpenFile("mail.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("无法创建或打开日志文件: %v", err)
+	// 1. 初始化日志轮转，防止日志文件无限增长
+	logFile := &lumberjack.Logger{
+		Filename:   "mail.log",
+		MaxSize:    10,   // 单个日志文件最大 10MB，超过后自动切割
+		MaxBackups: 3,    // 最多保留 3 个历史日志文件
+		MaxAge:     7,    // 历史日志文件最多保留 7 天
+		Compress:   true, // 压缩历史日志文件
 	}
-	defer logFile.Close()
 
 	// 2. 将日志同时输出到控制台和文件，并设置给 log 包与 gin 框架
 	multiWriter := io.MultiWriter(os.Stdout, logFile)
 	log.SetOutput(multiWriter)
-	gin.DefaultWriter = multiWriter // 让 Gin 的访问日志也写入该文件
+	gin.DefaultWriter = multiWriter
 
 	config := loadConfig()
 
@@ -118,7 +122,8 @@ func main() {
 
 	rr := NewRoundRobin(config.Accounts)
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(requestLogger(), gin.Recovery())
 
 	r.POST("/api/send", func(c *gin.Context) {
 
@@ -149,9 +154,8 @@ func main() {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "所有账号均发送失败: " + lastErr.Error()})
 	})
 
-	err = r.Run(":5010")
-	if err != nil {
-		return
+	if err := r.Run(":5010"); err != nil {
+		log.Fatalf("服务启动失败: %v", err)
 	}
 }
 
@@ -164,4 +168,47 @@ func sendEmail(host string, port int, user, pass, to, subject, body string) erro
 
 	d := gomail.NewDialer(host, port, user, pass)
 	return d.DialAndSend(m)
+}
+
+// requestLogger 自定义访问日志中间件：过滤 Cloudflare 后的安全扫描/探测请求
+func requestLogger() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+
+		c.Next()
+
+		if shouldSkipLog(c.Writer.Status(), path) {
+			return
+		}
+
+		log.Printf("[GIN] %s | %3d | %13v | %-15s | %s",
+			c.Request.Method,
+			c.Writer.Status(),
+			time.Since(start),
+			c.ClientIP(),
+			path,
+		)
+	}
+}
+
+// shouldSkipLog 判断请求日志是否应被忽略
+func shouldSkipLog(statusCode int, path string) bool {
+	// 本服务仅提供 /api/send 一个合法端点，所有 404 均为扫描/探测请求
+	if statusCode == http.StatusNotFound {
+		return true
+	}
+
+	// 过滤常见安全扫描路径（无论返回状态码）
+	lower := strings.ToLower(path)
+	for _, kw := range []string{
+		"/.env", "/.git", "/.aws", "/.ssh", "/wp-", "/php",
+		"/admin", "/actuator", "/config", "/backup", "/sql",
+		"/debug", "/trace", "/shell", "/.well-known", "/robots.txt",
+	} {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
