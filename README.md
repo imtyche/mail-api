@@ -78,6 +78,8 @@ services:
       - SMTP_HOST=smtp.qq.com
       - SMTP_PORT=465
       - APP_KEY=your-secret-key
+    volumes:
+      - /root/docker/mail/logs:/app/logs
     restart: unless-stopped
 ```
 
@@ -152,7 +154,7 @@ curl -X POST http://localhost:5010/api/send \
 
 ## 日志
 
-程序运行后会在当前工作目录生成 `mail.log` 文件，同时将日志输出到控制台。日志通过 `lumberjack` 自动切割，避免文件无限增长：
+程序运行后会在 `logs/` 目录下生成日志文件（容器中路径为 `/app/logs/mail.log`），同时将日志输出到控制台。日志通过 `lumberjack` 自动切割，避免文件无限增长：
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -186,6 +188,7 @@ curl -X POST http://localhost:5010/api/send \
 docker build -t mail-api .
 docker run -d \
   -p 5010:5010 \
+  -v /root/docker/mail/logs:/app/logs \
   -e SMTP_ACCOUNTS="sender@qq.com:授权码" \
   -e SMTP_HOST="smtp.qq.com" \
   -e SMTP_PORT="465" \

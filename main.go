@@ -100,16 +100,21 @@ type EmailRequest struct {
 }
 
 func main() {
-	// 1. 初始化日志轮转，防止日志文件无限增长
+	// 1. 创建日志目录（容器中可通过挂载 /app/logs 持久化）
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		log.Fatalf("无法创建日志目录: %v", err)
+	}
+
+	// 2. 初始化日志轮转，防止日志文件无限增长
 	logFile := &lumberjack.Logger{
-		Filename:   "mail.log",
+		Filename:   "logs/mail.log",
 		MaxSize:    10,   // 单个日志文件最大 10MB，超过后自动切割
 		MaxBackups: 3,    // 最多保留 3 个历史日志文件
 		MaxAge:     7,    // 历史日志文件最多保留 7 天
 		Compress:   true, // 压缩历史日志文件
 	}
 
-	// 2. 将日志同时输出到控制台和文件，并设置给 log 包与 gin 框架
+	// 3. 将日志同时输出到控制台和文件，并设置给 log 包与 gin 框架
 	multiWriter := io.MultiWriter(os.Stdout, logFile)
 	log.SetOutput(multiWriter)
 	gin.DefaultWriter = multiWriter
